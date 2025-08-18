@@ -3,7 +3,7 @@ version: '3.8'
 services:
   backend:
     build:
-      context: ./EmailServiceAPI
+      context: ./backend
       dockerfile: Dockerfile
     container_name: emailservice-backend
     environment:
@@ -21,7 +21,7 @@ services:
 
   frontend:
     build:
-      context: ./email-service-frontend
+      context: ./frontend
       dockerfile: Dockerfile
     container_name: emailservice-frontend
     ports:
