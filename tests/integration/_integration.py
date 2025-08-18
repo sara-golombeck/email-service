@@ -24,7 +24,7 @@
 #     resp = requests.post(f"{BASE_URL}/api/auth/login", json=payload, timeout=TIMEOUT)
 #     assert resp.status_code == 200
 #     data = resp.json()
-#     assert data["Success"] is True
+#     assert data["success"] is True
 #     print("PASS: Valid login")
 
 # def test_login_invalid():
@@ -33,7 +33,7 @@
 #     resp = requests.post(f"{BASE_URL}/api/auth/login", json=payload, timeout=TIMEOUT)
 #     assert resp.status_code == 400
 #     data = resp.json()
-#     assert data["Success"] is False
+#     assert data["success"] is False
 #     print("PASS: Invalid email validation")
 
 # def test_performance():
@@ -100,7 +100,7 @@ def test_login_valid():
     resp = requests.post(f"{BASE_URL}/api/auth/login", json=payload, timeout=TIMEOUT)
     assert resp.status_code == 200
     data = resp.json()
-    assert data["Success"] is True
+    assert data["success"] is True
     print("PASS: Valid login")
 
 def test_login_invalid():
@@ -109,7 +109,7 @@ def test_login_invalid():
     resp = requests.post(f"{BASE_URL}/api/auth/login", json=payload, timeout=TIMEOUT)
     assert resp.status_code == 400
     data = resp.json()
-    assert data["Success"] is False
+    assert data["success"] is False
     print("PASS: Invalid email validation")
 
 def test_performance():
