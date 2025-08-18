@@ -71,8 +71,9 @@ pipeline {
                     docker compose up -d --build                    
                     # Run integration tests
                     cd tests/integration
-                    pip3 install -r requirements.txt
-                    python3 integration_test.py
+                    docker run --rm -v $(pwd)/tests/integration:/app python:3.9-slim bash -c "cd /app && pip install -r requirements.txt && python -m pytest"
+                    # pip3 install -r requirements.txt
+                    # python3 integration_test.py
                 '''
             }
             post {
