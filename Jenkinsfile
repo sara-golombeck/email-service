@@ -79,7 +79,7 @@ pipeline {
                     echo "Running integration tests..."
                     docker run --rm \
                         --network automarkly_main_app-network \
-                        -e BASE_URL=http://emailservice-backend:8080 \
+                        -e BASE_URL=http://emailservice-frontend:80 \
                         ${APP_NAME}:integration-${BUILD_NUMBER}
                 '''
             }
