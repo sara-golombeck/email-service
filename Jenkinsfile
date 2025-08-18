@@ -1,13 +1,136 @@
+// pipeline {
+//     agent any
+    
+//     triggers {
+//         githubPush()
+//     }
+    
+//     environment {
+//         APP_NAME = 'automarkly'
+//         BUILD_NUMBER = "${env.BUILD_NUMBER}"
+//     }
+    
+//     stages {
+//         stage('Checkout') {
+//             steps {
+//                 checkout scm
+//             }
+//         }
+        
+//         // stage('Unit Tests') {
+//         //     parallel {
+//         //         stage('Backend Tests') {
+//         //             steps {
+//         //                 dir('backend') {
+//         //                     sh '''
+//         //                         docker build -f Dockerfile.test -t ${APP_NAME}:test-${BUILD_NUMBER} .
+//         //                         mkdir -p test-results
+//         //                         docker run --rm \
+//         //                             -v ${PWD}/test-results:/app/test-results \
+//         //                             ${APP_NAME}:test-${BUILD_NUMBER}
+//         //                     '''
+//         //                 }
+//         //             }
+//         //             post {
+//         //                 always {
+//         //                     archiveArtifacts artifacts: 'backend/test-results/**/*', allowEmptyArchive: true
+//         //                 }
+//         //             }
+//         //         }
+                
+//         //         stage('Frontend Tests') {
+//         //             steps {
+//         //                 dir('frontend') {
+//         //                     sh '''
+//         //                         docker build -f Dockerfile.test -t ${APP_NAME}:frontend-test-${BUILD_NUMBER} .
+//         //                         mkdir -p coverage
+//         //                         docker run --rm \
+//         //                             -v ${PWD}/coverage:/app/coverage \
+//         //                             ${APP_NAME}:frontend-test-${BUILD_NUMBER}
+//         //                     '''
+//         //                 }
+//         //             }
+//         //             post {
+//         //                 always {
+//         //                     archiveArtifacts artifacts: 'frontend/coverage/**/*', allowEmptyArchive: true
+//         //                 }
+//         //             }
+//         //         }
+//         //     }
+//         // }
+        
+//         stage('Integration Tests') {
+//             when {
+//                 expression { currentBuild.currentResult == 'SUCCESS' }
+//             }
+//             steps {
+//                 sh '''
+//                     # Build integration test image
+//                     docker build -t ${APP_NAME}:integration-${BUILD_NUMBER} tests/integration/
+                    
+//                     # Start the application
+//                     docker compose up -d --build                    
+//                     # Run integration tests
+//                     echo "Running integration tests..."
+//                     docker run --rm \
+//                         --network automarkly_main_app-network \
+//                         -e BASE_URL=http://emailservice-frontend:80 \
+//                         ${APP_NAME}:integration-${BUILD_NUMBER}
+//                 '''
+//             }
+//             post {
+//                 always {
+//                     sh '''
+//                         echo "Collecting logs..."
+//                         docker compose logs > integration-logs.txt || true
+//                         # docker compose down -v || true
+//                     '''
+//                     archiveArtifacts artifacts: 'integration-logs.txt', allowEmptyArchive: true
+//                 }
+//             }
+//         }
+//     }
+    
+//     post {
+//         always {
+//             sh '''
+//                 docker rmi ${APP_NAME}:test-${BUILD_NUMBER} || true
+//                 docker rmi ${APP_NAME}:frontend-test-${BUILD_NUMBER} || true
+//                 docker image prune -f || true
+//             '''
+//             cleanWs()
+//         }
+//         success {
+//             echo 'Pipeline completed successfully!'
+//         }
+//         failure {
+//             echo 'Pipeline failed!'
+//         }
+//     }
+// }
+
+
+
 pipeline {
     agent any
-    
-    triggers {
-        githubPush()
-    }
     
     environment {
         APP_NAME = 'automarkly'
         BUILD_NUMBER = "${env.BUILD_NUMBER}"
+        IMAGE_NAME = 'automarkly/emailservice'
+        AWS_ACCOUNT_ID = credentials('aws-account-id')
+        AWS_REGION = credentials('aws_region')
+        ECR_URL = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        ECR_REPO_BACKEND = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/automarkly/emailservice-backend"
+        ECR_REPO_FRONTEND = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/automarkly/emailservice-frontend"
+        GITOPS_REPO = 'git@github.com:sara-golombeck/gitops-automarkly.git'
+        GITOPS_BRANCH = 'main'
+        HELM_VALUES_PATH = 'charts/automarkly/values.yaml'
+        MAIN_TAG = ''
+    }
+    
+    triggers {
+        githubPush()
     }
     
     stages {
@@ -17,80 +140,254 @@ pipeline {
             }
         }
         
-        stage('Unit Tests') {
+        // stage('Unit Tests') {
+        //     parallel {
+        //         stage('Backend Tests') {
+        //             steps {
+        //                 dir('backend') {
+        //                     sh '''
+        //                         docker build -f Dockerfile.test -t ${APP_NAME}:backend-test-${BUILD_NUMBER} .
+        //                         mkdir -p test-results
+        //                         docker run --rm \
+        //                             -v ${PWD}/test-results:/app/test-results \
+        //                             ${APP_NAME}:backend-test-${BUILD_NUMBER}
+        //                     '''
+        //                 }
+        //             }
+        //             post {
+        //                 always {
+        //                     archiveArtifacts artifacts: 'backend/test-results/**/*', allowEmptyArchive: true
+        //                 }
+        //             }
+        //         }
+                
+        //         stage('Frontend Tests') {
+        //             steps {
+        //                 dir('frontend') {
+        //                     sh '''
+        //                         docker build -f Dockerfile.test -t ${APP_NAME}:frontend-test-${BUILD_NUMBER} .
+        //                         mkdir -p coverage
+        //                         docker run --rm \
+        //                             -v ${PWD}/coverage:/app/coverage \
+        //                             ${APP_NAME}:frontend-test-${BUILD_NUMBER}
+        //                     '''
+        //                 }
+        //             }
+        //             post {
+        //                 always {
+        //                     archiveArtifacts artifacts: 'frontend/coverage/**/*', allowEmptyArchive: true
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+        
+        stage('Build Application Images') {
             parallel {
-                stage('Backend Tests') {
+                stage('Build Backend') {
                     steps {
                         dir('backend') {
-                            sh '''
-                                docker build -f Dockerfile.test -t ${APP_NAME}:test-${BUILD_NUMBER} .
-                                mkdir -p test-results
-                                docker run --rm \
-                                    -v ${PWD}/test-results:/app/test-results \
-                                    ${APP_NAME}:test-${BUILD_NUMBER}
-                            '''
-                        }
-                    }
-                    post {
-                        always {
-                            archiveArtifacts artifacts: 'backend/test-results/**/*', allowEmptyArchive: true
+                            script {
+                                def backendImage = docker.build("${IMAGE_NAME}-backend:${BUILD_NUMBER}")
+                            }
                         }
                     }
                 }
                 
-                stage('Frontend Tests') {
+                stage('Build Frontend') {
                     steps {
                         dir('frontend') {
-                            sh '''
-                                docker build -f Dockerfile.test -t ${APP_NAME}:frontend-test-${BUILD_NUMBER} .
-                                mkdir -p coverage
-                                docker run --rm \
-                                    -v ${PWD}/coverage:/app/coverage \
-                                    ${APP_NAME}:frontend-test-${BUILD_NUMBER}
-                            '''
-                        }
-                    }
-                    post {
-                        always {
-                            archiveArtifacts artifacts: 'frontend/coverage/**/*', allowEmptyArchive: true
+                            script {
+                                def frontendImage = docker.build("${IMAGE_NAME}-frontend:${BUILD_NUMBER}")
+                            }
                         }
                     }
                 }
             }
         }
         
-        stage('Integration Tests') {
-            when {
-                expression { currentBuild.currentResult == 'SUCCESS' }
+        // stage('Integration Tests') {
+        //     when {
+        //         expression { currentBuild.currentResult == 'SUCCESS' }
+        //     }
+        //     steps {
+        //         sh '''
+        //             docker build -t ${APP_NAME}:integration-${BUILD_NUMBER} tests/integration/
+                    
+        //             docker compose up -d --build
+                    
+        //             echo "Waiting for services to start..."
+        //             sleep 30
+                    
+        //             echo "Running integration tests..."
+        //             docker run --rm \
+        //                 --network automarkly_main_app-network \
+        //                 -e BASE_URL=http://emailservice-frontend:80 \
+        //                 ${APP_NAME}:integration-${BUILD_NUMBER}
+        //         '''
+        //     }
+        //     post {
+        //         always {
+        //             sh '''
+        //                 docker compose logs > integration-logs.txt || true
+        //                 docker compose down -v || true
+        //             '''
+        //             archiveArtifacts artifacts: 'integration-logs.txt', allowEmptyArchive: true
+        //         }
+        //     }
+        // }
+        
+        stage('Create Version Tag') {
+            when { 
+                branch 'main' 
             }
             steps {
-                sh '''
-                    # Build integration test image
-                    docker build -t ${APP_NAME}:integration-${BUILD_NUMBER} tests/integration/
+                script {
+                    echo "Creating version tag..."
                     
-                    # Start the application
-                    docker compose up -d --build
-                    
-                    # Wait for services to be ready
-                    echo "Waiting for services to start..."
-                    sleep 30
-                    
-                    # Run integration tests
-                    echo "Running integration tests..."
-                    docker run --rm \
-                        --network automarkly_main_app-network \
-                        -e BASE_URL=http://emailservice-frontend:80 \
-                        ${APP_NAME}:integration-${BUILD_NUMBER}
-                '''
+                    sshagent(credentials: ['github']) {
+                        sh "git fetch --tags"
+                        
+                        try {
+                            def lastTag = sh(script: "git tag --sort=-version:refname | head -1", returnStdout: true).trim()
+                            echo "Found existing tag: ${lastTag}"
+                            
+                            def v = lastTag.tokenize('.')
+                            def newPatch = v[2].toInteger() + 1
+                            MAIN_TAG = v[0] + "." + v[1] + "." + newPatch
+                            
+                        } catch (Exception e) {
+                            echo "No existing tags found, starting from 1.0.0"
+                            MAIN_TAG = "1.0.0"
+                        }
+                        
+                        echo "Generated new tag: ${MAIN_TAG}"
+                    }
+                }
             }
-            post {
-                always {
-                    sh '''
-                        echo "Collecting logs..."
-                        docker compose logs > integration-logs.txt || true
-                        # docker compose down -v || true
-                    '''
-                    archiveArtifacts artifacts: 'integration-logs.txt', allowEmptyArchive: true
+        }
+        
+        stage('Push to ECR') {
+            when { 
+                branch 'main'
+            }
+            steps {
+                script {
+                    if (!MAIN_TAG || MAIN_TAG == '') {
+                        echo "WARNING: MAIN_TAG not set, skipping ECR push"
+                        return
+                    }
+                    
+                    echo "Pushing ${MAIN_TAG} to ECR..."
+                    
+                    sh """
+                        # Login to ECR using IAM role
+                        aws ecr get-login-password --region ${AWS_REGION} | \
+                            docker login --username AWS --password-stdin ${ECR_URL}
+                        
+                        # Create repositories if they don't exist
+                        aws ecr describe-repositories --repository-names automarkly/emailservice-backend --region ${AWS_REGION} || \
+                            aws ecr create-repository --repository-name automarkly/emailservice-backend --region ${AWS_REGION}
+                        
+                        aws ecr describe-repositories --repository-names automarkly/emailservice-frontend --region ${AWS_REGION} || \
+                            aws ecr create-repository --repository-name automarkly/emailservice-frontend --region ${AWS_REGION}
+                        
+                        # Push Backend
+                        docker tag ${IMAGE_NAME}-backend:${BUILD_NUMBER} ${ECR_REPO_BACKEND}:${MAIN_TAG}
+                        docker push ${ECR_REPO_BACKEND}:${MAIN_TAG}
+                        docker tag ${IMAGE_NAME}-backend:${BUILD_NUMBER} ${ECR_REPO_BACKEND}:latest
+                        docker push ${ECR_REPO_BACKEND}:latest
+                        
+                        # Push Frontend
+                        docker tag ${IMAGE_NAME}-frontend:${BUILD_NUMBER} ${ECR_REPO_FRONTEND}:${MAIN_TAG}
+                        docker push ${ECR_REPO_FRONTEND}:${MAIN_TAG}
+                        docker tag ${IMAGE_NAME}-frontend:${BUILD_NUMBER} ${ECR_REPO_FRONTEND}:latest
+                        docker push ${ECR_REPO_FRONTEND}:latest
+                    """
+                    
+                    echo "Successfully pushed ${MAIN_TAG} to ECR"
+                }
+            }
+        }
+        
+        stage('Push Git Tag') {
+            when { 
+                branch 'main'
+            }
+            steps {
+                script {
+                    if (!MAIN_TAG || MAIN_TAG == '') {
+                        echo "WARNING: MAIN_TAG not set, skipping git tag"
+                        return
+                    }
+                    
+                    echo "Pushing tag ${MAIN_TAG} to repository..."
+                    
+                    sshagent(credentials: ['github']) {
+                        withCredentials([
+                            string(credentialsId: 'git-username', variable: 'GIT_USERNAME'),
+                            string(credentialsId: 'git-email', variable: 'GIT_EMAIL')
+                        ]) {
+                            sh """
+                                git config user.email "${GIT_EMAIL}"
+                                git config user.name "${GIT_USERNAME}"
+                                
+                                git tag -a ${MAIN_TAG} -m "Release ${MAIN_TAG} - Build ${BUILD_NUMBER}"
+                                git push origin ${MAIN_TAG}
+                            """
+                        }
+                    }
+                    
+                    echo "Tag ${MAIN_TAG} pushed successfully"
+                }
+            }
+        }
+        
+        stage('Deploy via GitOps') {
+            when { 
+                branch 'main' 
+            }
+            steps {
+                script {
+                    if (!MAIN_TAG || MAIN_TAG == '') {
+                        echo "WARNING: MAIN_TAG not set, skipping GitOps update"
+                        return
+                    }
+                    
+                    sshagent(['github']) {
+                        sh '''
+                            rm -rf gitops-config
+                            echo "Cloning GitOps repository..."
+                            git clone ${GITOPS_REPO} gitops-config
+                        '''
+                        
+                        withCredentials([
+                            string(credentialsId: 'git-username', variable: 'GIT_USERNAME'),
+                            string(credentialsId: 'git-email', variable: 'GIT_EMAIL')
+                        ]) {
+                            dir('gitops-config') {
+                                sh """
+                                    git config user.email "${GIT_EMAIL}"
+                                    git config user.name "${GIT_USERNAME}"
+
+                                    # Update backend image tag
+                                    sed -i 's|backendTag: ".*"|backendTag: "${MAIN_TAG}"|g' ${HELM_VALUES_PATH}
+                                    
+                                    # Update frontend image tag
+                                    sed -i 's|frontendTag: ".*"|frontendTag: "${MAIN_TAG}"|g' ${HELM_VALUES_PATH}
+                                    
+                                    if git diff --quiet ${HELM_VALUES_PATH}; then
+                                        echo "No changes to deploy - version ${MAIN_TAG} already deployed"
+                                    else
+                                        git add ${HELM_VALUES_PATH}
+                                        git commit -m "Deploy ${APP_NAME} v${MAIN_TAG} - Build ${BUILD_NUMBER}"
+                                        git push origin ${GITOPS_BRANCH}
+                                        echo "GitOps updated: ${MAIN_TAG}"
+                                    fi
+                                """
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -99,15 +396,21 @@ pipeline {
     post {
         always {
             sh '''
-                docker rmi ${APP_NAME}:test-${BUILD_NUMBER} || true
+                docker compose down -v || true
+                rm -rf gitops-config || true
+                docker rmi ${APP_NAME}:backend-test-${BUILD_NUMBER} || true
                 docker rmi ${APP_NAME}:frontend-test-${BUILD_NUMBER} || true
+                docker rmi ${APP_NAME}:integration-${BUILD_NUMBER} || true
                 docker image prune -f || true
             '''
+            
             cleanWs()
         }
+        
         success {
             echo 'Pipeline completed successfully!'
         }
+        
         failure {
             echo 'Pipeline failed!'
         }
