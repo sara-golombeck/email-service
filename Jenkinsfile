@@ -6,7 +6,7 @@ pipeline {
     }
     
     environment {
-        APP_NAME = 'automarkly'  // שונה מ-emailserviceapi
+        APP_NAME = 'automarkly'
         BUILD_NUMBER = "${env.BUILD_NUMBER}"
     }
     
@@ -59,34 +59,7 @@ pipeline {
             }
         }
         
-        stage('Build Images') {
-            when {
-                expression { currentBuild.currentResult == 'SUCCESS' }
-            }
-            parallel {
-                stage('Backend') {
-                    steps {
-                        dir('backend') {
-                            sh '''
-                                docker build -t ${APP_NAME}:backend-${BUILD_NUMBER} .
-                                docker tag ${APP_NAME}:backend-${BUILD_NUMBER} ${APP_NAME}:backend-latest
-                            '''
-                        }
-                    }
-                }
-                
-                stage('Frontend') {
-                    steps {
-                        dir('frontend') {
-                            sh '''
-                                docker build -t ${APP_NAME}:frontend-${BUILD_NUMBER} .
-                                docker tag ${APP_NAME}:frontend-${BUILD_NUMBER} ${APP_NAME}:frontend-latest
-                            '''
-                        }
-                    }
-                }
-            }
-        }
+
         
         stage('Integration Tests') {
             when {
@@ -94,17 +67,21 @@ pipeline {
             }
             steps {
                 sh '''
-                    docker-compose up -d
-                    timeout 120 bash -c 'until curl -f http://localhost/api/health; do sleep 5; done'
-                    curl -X POST http://localhost/api/auth/login \
-                         -H "Content-Type: application/json" \
-                         -d '{"email":"test@example.com"}' \
-                         --fail
+                    # Start the application
+                    docker compose up -d --build                    
+                    # Run integration tests
+                    cd tests/integration
+                    pip3 install -r requirements.txt
+                    python3 integration_test.py
                 '''
             }
             post {
                 always {
-                    sh 'docker-compose down -v || true'
+                    sh '''
+                        docker-compose logs || true
+                        docker-compose down -v || true
+                    '''
+                    archiveArtifacts artifacts: 'tests/integration/test-results/**/*', allowEmptyArchive: true
                 }
             }
         }
@@ -118,6 +95,12 @@ pipeline {
                 docker image prune -f || true
             '''
             cleanWs()
+        }
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
         }
     }
 }
