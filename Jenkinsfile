@@ -88,7 +88,7 @@ pipeline {
                     sh '''
                         echo "Collecting logs..."
                         docker compose logs > integration-logs.txt || true
-                        docker compose down -v || true
+                        # docker compose down -v || true
                     '''
                     archiveArtifacts artifacts: 'integration-logs.txt', allowEmptyArchive: true
                 }
