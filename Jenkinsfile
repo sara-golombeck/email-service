@@ -1,6 +1,10 @@
 pipeline {
     agent any
-    
+
+        triggers {
+        githubPush()
+    }
+
     environment {
         APP_NAME = 'emailserviceapi'
         BUILD_NUMBER = "${env.BUILD_NUMBER}"
@@ -12,7 +16,6 @@ pipeline {
                 checkout scm
             }
         }
-        
         stage('Unit Tests') {
             parallel {
                 stage('Backend Tests') {
