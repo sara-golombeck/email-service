@@ -267,49 +267,41 @@ pipeline {
             }
         }
         
-        stage('Push to ECR') {
-            when { 
-                branch 'main'
+stage('Push to ECR') {
+    when { 
+        branch 'main'
+    }
+    steps {
+        script {
+            if (!MAIN_TAG || MAIN_TAG == '') {
+                echo "WARNING: MAIN_TAG not set, skipping ECR push"
+                return
             }
-            steps {
-                script {
-                    if (!MAIN_TAG || MAIN_TAG == '') {
-                        echo "WARNING: MAIN_TAG not set, skipping ECR push"
-                        return
-                    }
-                    
-                    echo "Pushing ${MAIN_TAG} to ECR..."
-                    
-                    sh """
-                        # Login to ECR using IAM role
-                        aws ecr get-login-password --region ${AWS_REGION} | \
-                            docker login --username AWS --password-stdin ${ECR_URL}
-                        
-                        # Create repositories if they don't exist
-                        aws ecr describe-repositories --repository-names automarkly/emailservice-backend --region ${AWS_REGION} || \
-                            aws ecr create-repository --repository-name automarkly/emailservice-backend --region ${AWS_REGION}
-                        
-                        aws ecr describe-repositories --repository-names automarkly/emailservice-frontend --region ${AWS_REGION} || \
-                            aws ecr create-repository --repository-name automarkly/emailservice-frontend --region ${AWS_REGION}
-                        
-                        # Push Backend
-                        docker tag ${IMAGE_NAME}-backend:${BUILD_NUMBER} ${ECR_REPO_BACKEND}:${MAIN_TAG}
-                        docker push ${ECR_REPO_BACKEND}:${MAIN_TAG}
-                        docker tag ${IMAGE_NAME}-backend:${BUILD_NUMBER} ${ECR_REPO_BACKEND}:latest
-                        docker push ${ECR_REPO_BACKEND}:latest
-                        
-                        # Push Frontend
-                        docker tag ${IMAGE_NAME}-frontend:${BUILD_NUMBER} ${ECR_REPO_FRONTEND}:${MAIN_TAG}
-                        docker push ${ECR_REPO_FRONTEND}:${MAIN_TAG}
-                        docker tag ${IMAGE_NAME}-frontend:${BUILD_NUMBER} ${ECR_REPO_FRONTEND}:latest
-                        docker push ${ECR_REPO_FRONTEND}:latest
-                    """
-                    
-                    echo "Successfully pushed ${MAIN_TAG} to ECR"
-                }
-            }
+            
+            echo "Pushing ${MAIN_TAG} to ECR..."
+            
+            sh '''
+                # Login to ECR using IAM role
+                aws ecr get-login-password --region "${AWS_REGION}" | \
+                    docker login --username AWS --password-stdin "${ECR_URL}"
+                
+                # Push Backend
+                docker tag "${IMAGE_NAME}-backend:${BUILD_NUMBER}" "${ECR_REPO_BACKEND}:${MAIN_TAG}"
+                docker push "${ECR_REPO_BACKEND}:${MAIN_TAG}"
+                docker tag "${IMAGE_NAME}-backend:${BUILD_NUMBER}" "${ECR_REPO_BACKEND}:latest"
+                docker push "${ECR_REPO_BACKEND}:latest"
+                
+                # Push Frontend
+                docker tag "${IMAGE_NAME}-frontend:${BUILD_NUMBER}" "${ECR_REPO_FRONTEND}:${MAIN_TAG}"
+                docker push "${ECR_REPO_FRONTEND}:${MAIN_TAG}"
+                docker tag "${IMAGE_NAME}-frontend:${BUILD_NUMBER}" "${ECR_REPO_FRONTEND}:latest"
+                docker push "${ECR_REPO_FRONTEND}:latest"
+            '''
+            
+            echo "Successfully pushed ${MAIN_TAG} to ECR"
         }
-        
+    }
+}
         stage('Push Git Tag') {
             when { 
                 branch 'main'
