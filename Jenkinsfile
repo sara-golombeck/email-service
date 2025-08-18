@@ -33,7 +33,6 @@ pipeline {
                     }
                     post {
                         always {
-                            publishTestResults testResultsPattern: 'backend/test-results/*.trx'
                             archiveArtifacts artifacts: 'backend/test-results/**/*', allowEmptyArchive: true
                         }
                     }
