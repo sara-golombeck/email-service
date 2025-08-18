@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Default command
-CMD ["python", "integration.py"]
+CMD ["python", "_integration.py"]
