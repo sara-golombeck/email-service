@@ -59,30 +59,38 @@ pipeline {
             }
         }
         
-
-        
         stage('Integration Tests') {
             when {
                 expression { currentBuild.currentResult == 'SUCCESS' }
             }
             steps {
                 sh '''
+                    # Build integration test image
+                    docker build -t ${APP_NAME}:integration-${BUILD_NUMBER} tests/integration/
+                    
                     # Start the application
-                    docker compose up -d --build                    
+                    docker compose up -d --build
+                    
+                    # Wait for services to be ready
+                    echo "Waiting for services to start..."
+                    sleep 30
+                    
                     # Run integration tests
-                    cd tests/integration
-                    docker run --rm -v $(pwd)/tests/integration:/app python:3.9-slim bash -c "cd /app && pip install -r requirements.txt && python -m pytest"
-                    # pip3 install -r requirements.txt
-                    # python3 integration_test.py
+                    echo "Running integration tests..."
+                    docker run --rm \
+                        --network automarkly_main_app-network \
+                        -e BASE_URL=http://emailservice-backend:8080 \
+                        ${APP_NAME}:integration-${BUILD_NUMBER}
                 '''
             }
             post {
                 always {
                     sh '''
-                        docker-compose logs || true
-                        docker-compose down -v || true
+                        echo "Collecting logs..."
+                        docker compose logs > integration-logs.txt || true
+                        docker compose down -v || true
                     '''
-                    archiveArtifacts artifacts: 'tests/integration/test-results/**/*', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'integration-logs.txt', allowEmptyArchive: true
                 }
             }
         }
