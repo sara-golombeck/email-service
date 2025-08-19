@@ -3,6 +3,7 @@ using EmailServiceAPI.Services;
 using EmailServiceAPI.Validators;
 using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -25,6 +26,10 @@ builder.Services.AddCors(options =>
 // Add validation
 builder.Services.AddScoped<IValidator<LoginRequest>, LoginRequestValidator>();
 
+// Add database context
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+
 // Add custom services
 builder.Services.AddScoped<IEmailService, EmailService>();
 
@@ -32,6 +37,13 @@ builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddLogging();
 
 var app = builder.Build();
+
+// Ensure database is created
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    context.Database.EnsureCreated();
+}
 
 // Configure the HTTP request pipeline
 if (app.Environment.IsDevelopment())
@@ -48,6 +60,7 @@ app.MapPost("/api/auth/login", async (
     [FromBody] LoginRequest request,
     IValidator<LoginRequest> validator,
     IEmailService emailService,
+    AppDbContext context,
     ILogger<Program> logger) =>
 {
     try
@@ -64,6 +77,28 @@ app.MapPost("/api/auth/login", async (
                 Errors = validationResult.Errors.Select(e => e.ErrorMessage).ToList()
             });
         }
+
+        // Save user login attempt to database
+        var user = await context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
+        if (user == null)
+        {
+            user = new User 
+            { 
+                Email = request.Email,
+                LoginAttempts = 1,
+                LastLoginAttempt = DateTime.UtcNow
+            };
+            context.Users.Add(user);
+        }
+        else
+        {
+            user.LoginAttempts++;
+            user.LastLoginAttempt = DateTime.UtcNow;
+        }
+        await context.SaveChangesAsync();
+        
+        logger.LogInformation("User login attempt recorded: {Email}, Total attempts: {Attempts}", 
+            request.Email, user.LoginAttempts);
 
         // Process login (currently just logging, will integrate with AWS SES later)
         var result = await emailService.SendLoginEmailAsync(request.Email);

@@ -109,6 +109,7 @@ temp/
 *.db
 *.sqlite
 *.sqlite3
+postgres_data/
 
 # Keys and certificates
 *.key
