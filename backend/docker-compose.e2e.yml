@@ -20,23 +20,12 @@ services:
       retries: 5
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: automarkly-backend:${BUILD_NUMBER}
     container_name: emailservice-backend
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080
       - ConnectionStrings__DefaultConnection=Host=${COMPOSE_PROJECT_NAME}_postgres;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
-      - AWS_DEFAULT_REGION=ap-south-1
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-    # healthcheck:
-    #   test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
-    #   interval: 30s
-    #   timeout: 10s
-    #   retries: 3
-    #   start_period: 40s
     restart: unless-stopped
     depends_on:
       postgres:
@@ -45,36 +34,13 @@ services:
       - app-network
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: ${ECR_TAG_FRONT}:latest
     container_name: emailservice-frontend
     ports:
       - "80:80"
     depends_on:
       - backend
-    # healthcheck:
-    #   test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
-    #   interval: 30s
-    #   timeout: 10s
-    #   retries: 3
-    #   start_period: 40s
     restart: unless-stopped
-    networks:
-      - app-network
-
-  email-worker:
-    build:
-      context: ./email-worker
-      dockerfile: Dockerfile
-    container_name: emailservice-worker
-    environment:
-      - AWS_DEFAULT_REGION=ap-south-1
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-    restart: unless-stopped
-    depends_on:
-      - backend
     networks:
       - app-network
 
@@ -84,4 +50,3 @@ networks:
 
 volumes:
   postgres_data:
-  app-data:
