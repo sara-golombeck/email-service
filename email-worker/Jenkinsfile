@@ -4,9 +4,6 @@ pipeline {
     environment {
         APP_NAME = 'email-worker'
         BUILD_NUMBER = "${env.BUILD_NUMBER}"
-        AWS_ACCOUNT_ID = credentials('aws-account-id')
-        AWS_REGION = credentials('aws_region')
-        ECR_REPO_WORKER = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/automarkly/emailservice-worker"
         GITOPS_REPO = 'git@github.com:sara-golombeck/gitops-email-service.git'
         HELM_VALUES_PATH = 'charts/email-service/values.yaml'
     }
@@ -16,9 +13,28 @@ pipeline {
     }
     
     stages {
-        stage('Checkout') {
+stage('Checkout') {
+    steps {
+        checkout scm
+        sshagent(['github']) {
+            sh "git fetch --tags --unshallow || git fetch --tags"
+        }
+    }
+}        
+        stage('Unit Tests') {
             steps {
-                checkout scm
+                sh '''
+                    docker build -f Dockerfile.test -t "${APP_NAME}:test-${BUILD_NUMBER}" .
+                    mkdir -p test-results
+                    docker run --rm \
+                        -v "${PWD}/test-results:/app/test-results" \
+                        "${APP_NAME}:test-${BUILD_NUMBER}"
+                '''
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'test-results/**/*', allowEmptyArchive: true
+                }
             }
         }
         
@@ -30,43 +46,92 @@ pipeline {
             }
         }
         
-        stage('Create Version Tag') {
-            when { 
-                branch 'main' 
-            }
-            steps {
-                script {
-                    echo "Creating version tag..."
-                    
-                    sshagent(credentials: ['github']) {
-                        sh "git fetch --tags"
-                        
-                        def newTag = "1.0.0"  // default
-                        
-                        try {
-                            def lastTag = sh(script: "git tag --sort=-version:refname | head -1", returnStdout: true).trim()
-                            if (lastTag && lastTag != '') {
-                                echo "Found existing tag: ${lastTag}"
-                                
-                                def v = lastTag.tokenize('.')
-                                if (v.size() >= 3) {
-                                    def newPatch = v[2].toInteger() + 1
-                                    newTag = v[0] + "." + v[1] + "." + newPatch
-                                }
-                            } else {
-                                echo "No existing tags found, starting from 1.0.0"
-                            }
-                        } catch (Exception e) {
-                            echo "Error reading tags: ${e.getMessage()}, starting from 1.0.0"
-                        }
-                        
-                        echo "Generated new tag: ${newTag}"
-                        env.WORKER_TAG = newTag
-                        echo "Version tag ${env.WORKER_TAG} prepared successfully"
-                    }
-                }
-            }
+        
+stage('Create Version Tag') {
+    when { 
+        branch 'main' 
+    }
+    steps {
+        script {
+            echo "Downloading and running GitVersion..."
+            
+            sh '''
+                curl -L https://github.com/GitTools/GitVersion/releases/download/6.4.0/gitversion-linux-x64-6.4.0.tar.gz -o gitversion.tar.gz
+                tar -xzf gitversion.tar.gz
+                chmod +x gitversion
+                ./gitversion -showvariable SemVer > version.txt
+            '''
+
+            env.WORKER_TAG = readFile('version.txt').trim()
+            sh 'rm -f gitversion* version.txt'
+            
+            echo "Version calculated: ${env.WORKER_TAG}"
         }
+    }
+}
+
+//         stage('Create Version Tag') {
+//     when { 
+//         branch 'main' 
+//     }
+//     steps {
+//         script {
+//             echo "Calculating version with GitVersion..."
+            
+//             def versionOutput = sh(
+//                 script: '''
+//                     docker run --rm \
+//                     -v "$(pwd):/repo" \
+//                     gittools/gitversion:6.4.0-alpine.3.21-8.0 \
+//                     /repo /showvariable SemVer
+//                 ''',
+//                 returnStdout: true
+//             ).trim()
+            
+//             env.WORKER_TAG = versionOutput
+//             echo "Version calculated: ${env.WORKER_TAG}"
+//         }
+//     }
+// }
+        
+        
+        // stage('Create Version Tag') {
+        //     when { 
+        //         branch 'main' 
+        //     }
+        //     steps {
+        //         script {
+        //             echo "Creating version tag..."
+                    
+        //             sshagent(['github']) {
+        //                 sh "git fetch --tags"
+                        
+        //                 def newTag = "1.0.0"  // default
+                        
+        //                 try {
+        //                     def lastTag = sh(script: "git tag --sort=-version:refname | head -1", returnStdout: true).trim()
+        //                     if (lastTag && lastTag != '') {
+        //                         echo "Found existing tag: ${lastTag}"
+                                
+        //                         def v = lastTag.tokenize('.')
+        //                         if (v.size() >= 3) {
+        //                             def newPatch = v[2].toInteger() + 1
+        //                             newTag = v[0] + "." + v[1] + "." + newPatch
+        //                         }
+        //                     } else {
+        //                         echo "No existing tags found, starting from 1.0.0"
+        //                     }
+        //                 } catch (Exception e) {
+        //                     echo "Error reading tags: ${e.getMessage()}, starting from 1.0.0"
+        //                 }
+                        
+        //                 echo "Generated new tag: ${newTag}"
+        //                 env.WORKER_TAG = newTag
+        //                 echo "Version tag ${env.WORKER_TAG} prepared successfully"
+        //             }
+        //         }
+        //     }
+        // }
         
         stage('Push to ECR') {
             when { 
@@ -80,17 +145,26 @@ pipeline {
                     
                     echo "Pushing ${env.WORKER_TAG} to ECR..."
                     
-                    sh '''
-                        aws ecr get-login-password --region "${AWS_REGION}" | \
-                            docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+                    withCredentials([
+                        string(credentialsId: 'aws-account-id', variable: 'AWS_ACCOUNT_ID'),
+                        string(credentialsId: 'aws_region', variable: 'AWS_REGION')
+                    ]) {
+                        def ECR_REPO_WORKER = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/automarkly/emailservice-worker"
                         
-                        docker tag "${APP_NAME}:${BUILD_NUMBER}" "${ECR_REPO_WORKER}:${WORKER_TAG}"
-                        docker tag "${APP_NAME}:${BUILD_NUMBER}" "${ECR_REPO_WORKER}:latest"
-                        
-                        docker push "${ECR_REPO_WORKER}:${WORKER_TAG}"
-                        docker push "${ECR_REPO_WORKER}:latest"
-                    '''
+                        sh '''
+                            aws ecr get-login-password --region "${AWS_REGION}" | \
+                                docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+                            
+                            docker tag "${APP_NAME}:${BUILD_NUMBER}" "''' + ECR_REPO_WORKER + ''':${WORKER_TAG}"
+                            docker tag "${APP_NAME}:${BUILD_NUMBER}" "''' + ECR_REPO_WORKER + ''':latest"
+                            
+                            docker push "''' + ECR_REPO_WORKER + ''':${WORKER_TAG}"
+                            docker push "''' + ECR_REPO_WORKER + ''':latest"
+                        '''
+                    }
                     
+
+
                     echo "Successfully pushed ${env.WORKER_TAG} to ECR"
                 }
             }
@@ -123,7 +197,7 @@ pipeline {
                                     git config user.email "${GIT_EMAIL}"
                                     git config user.name "${GIT_USERNAME}"
 
-                                    sed -i "s|worker: \\\\".*\\\\"|worker: \\\\"${WORKER_TAG}\\\\"|g" "${HELM_VALUES_PATH}"
+                                    sed -i '/^  images:/,/^[^ ]/ s/worker: ".*"/worker: "'${WORKER_TAG}'"/' "${HELM_VALUES_PATH}"
                                     
                                     if git diff --quiet "${HELM_VALUES_PATH}"; then
                                         echo "No changes to deploy - version ${WORKER_TAG} already deployed"
@@ -154,7 +228,7 @@ pipeline {
                     
                     echo "Pushing tag ${env.WORKER_TAG} to repository..."
                     
-                    sshagent(credentials: ['github']) {
+                    sshagent(['github']) {
                         withCredentials([
                             string(credentialsId: 'git-username', variable: 'GIT_USERNAME'),
                             string(credentialsId: 'git-email', variable: 'GIT_EMAIL')
@@ -169,7 +243,7 @@ pipeline {
                         }
                     }
                     
-                    echo "Tag ${env.WORKER_TAG} pushed successfully"
+                    echo "Tag ${WORKER_TAG} pushed successfully"
                 }
             }
         }
@@ -179,6 +253,7 @@ pipeline {
         always {
             sh '''
                 rm -rf gitops-config || true
+                docker rmi "${APP_NAME}:test-${BUILD_NUMBER}" || true
                 docker rmi "${APP_NAME}:${BUILD_NUMBER}" || true
                 docker image prune -f || true
             '''
